@@ -3,16 +3,22 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from asgiref.sync import sync_to_async
 import asyncio
 import uuid
-
 from .models import Room, User
-from .rl_model import choose_word, suggest_steps, provide_suggestions, check_guess, update_model
+from .monte_carlo_agent import MonteCarloAgent  # Change import as needed
+import gym
+from .rl_model import choose_word, suggest_steps, provide_suggestions, check_guess, update_model, get_state, adjust_word_difficulty
 
 class GameConsumer(AsyncWebsocketConsumer):
+    env = gym.make('CartPole-v1')
+    agent = MonteCarloAgent(env)  # Initialize the Monte Carlo agent
+
     async def connect(self):
         self.room_name = self.scope['url_route']['kwargs']['room_name']
         self.room_group_name = f'game_{self.room_name}'
-        self.user_id = self.scope['query_string'].decode('utf-8').split('&')[0].split('=')[1]
-        self.user_name = self.scope['query_string'].decode('utf-8').split('&')[1].split('=')[1]
+        self.user_id = str(uuid.uuid4())
+        self.user_name = None
+        self.current_word = None  # Add a variable to store the current word
+        self.env.reset()  # Reset the environment upon connection
 
         # Join room group
         await self.channel_layer.group_add(
@@ -25,7 +31,8 @@ class GameConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         # Remove user from room
-        await self.remove_user_from_room()
+        if self.user_id:
+            await self.remove_user_from_room()
 
         # Leave room group
         await self.channel_layer.group_discard(
@@ -38,20 +45,30 @@ class GameConsumer(AsyncWebsocketConsumer):
         action = data.get('action')
 
         if action == 'join':
+            self.user_name = data['username']
+            self.user_id = data['userId']
             await self.add_user_to_room(self.user_name, self.user_id)
         elif action == 'start_game':
+            self.env.reset()  # Reset the environment when the game starts
             await self.start_game()
         elif action == 'drawing':
+            drawing = data['drawing']
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     'type': 'draw',
-                    'drawing': data['drawing'],
+                    'drawing': drawing,
                     'drawer': data['drawer'],
+                    'suggestion': provide_suggestions(drawing)
                 }
             )
+            state = get_state(drawing)
+            action = self.agent.choose_action(state)
+            next_state, reward, terminated, truncated, _ = self.env.step(action)
+            next_state = get_state(next_state)
+            self.agent.update_q_table(state, action, reward, next_state)
         elif action == 'guess':
-            correct = check_guess(self.room_name, data['guess'])
+            correct = await sync_to_async(check_guess)(self.room_name, data['guess'])
             if correct:
                 await self.channel_layer.group_send(
                     self.room_group_name,
@@ -61,19 +78,18 @@ class GameConsumer(AsyncWebsocketConsumer):
                         'guess': data['guess']
                     }
                 )
-            await self.channel_layer.group_send(
-                self.room_group_name,
-                {
-                    'type': 'chat_message',
-                    'username': data['username'],
-                    'message': data['guess']
-                }
-            )
-            update_model(self.room_name, data)
-        elif action == 'next_turn':
-            await self.next_turn()
+                # Adjust difficulty if the guess is correct
+                if self.current_word:
+                    adjust_word_difficulty(self.current_word, correct_guess=True)
+            else:
+                if self.current_word:
+                    adjust_word_difficulty(self.current_word, correct_guess=False)
+            # Include the drawing data here if needed
+            data['drawing'] = self.current_word  # Ensure current drawing is available
+            await sync_to_async(update_model)(self.room_name, data)
 
     async def new_word(self, event):
+        self.current_word = event['word']  # Store the current word
         await self.send(text_data=json.dumps({
             'action': 'new_word',
             'word': event['word'],
@@ -85,6 +101,7 @@ class GameConsumer(AsyncWebsocketConsumer):
             'action': 'draw',
             'drawing': event['drawing'],
             'drawer': event['drawer'],
+            'suggestion': event['suggestion'],
         }))
 
     async def chat_message(self, event):
@@ -105,6 +122,10 @@ class GameConsumer(AsyncWebsocketConsumer):
         word = choose_word(self.room_name)
         steps = suggest_steps(word)
 
+        # Update the current word for the room
+        await sync_to_async(Room.objects.filter(name=self.room_name).update)(current_word=word)
+        self.current_word = word  # Store the current word
+        print(f"Drawer: {drawer}, Word: {word}")
         # Notify the drawer
         await self.channel_layer.send(
             drawer,
@@ -121,6 +142,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             {
                 'type': 'turn',
                 'drawer': drawer,
+                'word': word,
+                'steps': steps,
             }
         )
         await self.channel_layer.group_send(
@@ -136,6 +159,8 @@ class GameConsumer(AsyncWebsocketConsumer):
         await self.send(text_data=json.dumps({
             'action': 'turn',
             'drawer': event['drawer'],
+            'word': event.get('word', ''),  # Ensure word is included
+            'steps': event.get('steps', [])
         }))
 
     async def clear_canvas(self, event):
@@ -212,6 +237,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         }))
 
     async def start_game(self):
+        self.env.reset()  # Reset the environment when the game starts
         room = await sync_to_async(Room.objects.get)(name=self.room_name)
         room.current_drawer = 0
         await sync_to_async(room.save)()
@@ -241,3 +267,8 @@ class GameConsumer(AsyncWebsocketConsumer):
             user.delete()
         room.users = max(0, room.users - len(users))
         room.save()
+
+    def calculate_reward(self, drawing, guess):
+        # Define your reward function based on the drawing and guessing accuracy
+        # For simplicity, let's assume a fixed reward
+        return 1  # You can customize this based on the actual requirements

@@ -1,16 +1,16 @@
 import numpy as np
 import random
 
-class QLearningAgent:
-    def __init__(self, env, alpha=0.1, gamma=0.9, epsilon=0.1):
+class MonteCarloAgent:
+    def __init__(self, env, alpha=0.1):
         self.actions = list(range(env.action_space.n))  # List of possible actions
         self.alpha = alpha  # Learning rate
-        self.gamma = gamma  # Discount factor
-        self.epsilon = epsilon  # Exploration rate
         self.q_table = {}  # Initialize the Q-table
         self.state_bins = self.create_bins(env.observation_space)
 
         self.word_q_table = {}  # Q-table for word difficulties
+        self.word_returns_sum = {}
+        self.word_returns_count = {}
 
     def create_bins(self, observation_space, num_bins=10):
         bins = []
@@ -27,8 +27,8 @@ class QLearningAgent:
         return tuple(state_indices)
 
     def choose_action(self, state):
-        # Epsilon-greedy action selection
-        if np.random.uniform(0, 1) < self.epsilon:
+        # keeping it similar for simplicity
+        if np.random.uniform(0, 1) < self.alpha:
             action = random.choice(self.actions)
         else:
             action = self.get_best_action(state)
@@ -45,16 +45,21 @@ class QLearningAgent:
         next_state = self.discretize_state(next_state)
         self.q_table.setdefault(state, {action: 0 for action in self.actions})
         self.q_table.setdefault(next_state, {action: 0 for action in self.actions})
-        best_next_action = self.get_best_action(next_state)
-        self.q_table[state][action] += self.alpha * (
-            reward + self.gamma * self.q_table[next_state][best_next_action] - self.q_table[state][action]
-        )
+        self.q_table[state][action] += self.alpha * (reward - self.q_table[state][action])
 
-    def adjust_word_difficulty(self, word, reward):
+    def adjust_word_difficulty(self, word, correct_guess):
+        reward = 1 if correct_guess else 0
+        self.word_returns_sum.setdefault(word, 0)
+        self.word_returns_count.setdefault(word, 0)
         self.word_q_table.setdefault(word, 0)
-        self.word_q_table[word] += self.alpha * (reward - self.word_q_table[word])
 
-    def choose_word(self):
+        self.word_returns_sum[word] += reward
+        self.word_returns_count[word] += 1
+        self.word_q_table[word] = self.word_returns_sum[word] / self.word_returns_count[word]
+
+    def choose_word(self, words):
         if not self.word_q_table:
-            return random.choice(["apple", "banana", "cat", "dog", "elephant"])
-        return max(self.word_q_table, key=self.word_q_table.get)
+            return random.choice(words)
+        word_probs = [1 / (self.word_q_table.get(word, 1) + 1) for word in words]
+        word_probs = word_probs / np.sum(word_probs)
+        return np.random.choice(words, p=word_probs)

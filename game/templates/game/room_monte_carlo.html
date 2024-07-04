@@ -1,15 +1,16 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Room {{ room_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
-            font-family: Arial, sans-serif;
             display: flex;
             flex-direction: row;
             height: 100vh;
             margin: 0;
-            padding: 0;
         }
         #drawing-section {
             flex: 2;
@@ -40,10 +41,36 @@
             width: calc(100% - 20px);
             margin: 10px;
         }
-        #userCount, #turnMessage, #timer, #word {
+        #userCount, #turnMessage, #timer, #word, #suggestions {
             margin: 10px;
         }
     </style>
+</head>
+<body>
+    <div id="drawing-section" class="p-3">
+        <h1>Room {{ room_name }}</h1>
+        <button id="startGame" class="btn btn-primary">Start Game</button>
+        <div id="userCount" class="mt-3">Users in room: 0</div>
+        <div id="drawer">Waiting for players...</div>
+        <div id="timer" class="mt-3"></div>
+        <div id="word" class="mt-3"></div>
+        <div id="suggestions" class="mt-3"></div>
+        <canvas id="canvas" width="800" height="600" class="mt-3"></canvas>
+        <div id="drawingControls" class="mt-3" style="display: none;">
+            <p id="turnMessage"></p>
+            <p>You are drawing. Please draw the word!</p>
+        </div>
+        <div id="guessingControls" class="mt-3" style="display: none;">
+            <p id="turnMessage"></p>
+            <input type="text" id="guess" placeholder="Enter your guess" class="form-control">
+            <button id="sendGuess" class="btn btn-secondary mt-2">Send Guess</button>
+        </div>
+    </div>
+    <div id="chat-section" class="p-3">
+        <div id="chat" class="flex-grow-1"></div>
+        <input type="text" id="messageInput" placeholder="Type a message..." class="form-control">
+        <button id="sendMessage" class="btn btn-secondary mt-2">Send</button>
+    </div>
     <script>
         document.addEventListener('DOMContentLoaded', (event) => {
             let userId = localStorage.getItem('user_id');
@@ -83,7 +110,10 @@
             socket.onmessage = function(e) {
                 const data = JSON.parse(e.data);
                 if (data.action === 'new_word') {
-                    document.getElementById('word').innerText = data.word;
+                    if (data.drawer === userId) {
+                        document.getElementById('word').innerText = `Draw this word: ${data.word}`;
+                        document.getElementById('suggestions').innerText = `Suggested steps: ${data.steps.join(', ')}`;
+                    }
                     document.getElementById('turnMessage').innerText = 'It\'s your turn to draw.';
                     document.getElementById('drawer').innerText = 'You are drawing';
                 } else if (data.action === 'draw') {
@@ -94,6 +124,9 @@
                         ctx.drawImage(image, 0, 0);
                     };
                     image.src = data.drawing;
+                    if (data.drawer === userId) {
+                        document.getElementById('suggestions').innerText = `Suggestion: ${data.suggestion}`;
+                    }
                 } else if (data.action === 'correct_guess') {
                     const chat = document.getElementById('chat');
                     chat.innerHTML += `<p><strong>${data.username}:</strong> guessed correctly: ${data.guess}</p>`;
@@ -106,7 +139,14 @@
                     document.getElementById('userCount').innerText = `Users in room: ${data.user_count}`;
                 } else if (data.action === 'turn') {
                     drawer = data.drawer;
-                    if (drawer !== userId) {
+                    if (drawer === userId) {
+                        document.getElementById('word').innerText = `Draw this word: ${data.word}`;
+                        document.getElementById('suggestions').innerText = `Suggested steps: ${data.steps.join(', ')}`;
+                        document.getElementById('turnMessage').innerText = 'It\'s your turn to draw.';
+                        document.getElementById('drawer').innerText = 'You are drawing';
+                    } else {
+                        document.getElementById('word').innerText = '';
+                        document.getElementById('suggestions').innerText = '';
                         document.getElementById('turnMessage').innerText = `It's ${drawer}'s turn to draw.`;
                         document.getElementById('drawer').innerText = `${drawer} is drawing`;
                     }
@@ -189,30 +229,5 @@
             }
         });
     </script>
-</head>
-<body>
-    <div id="drawing-section">
-        <h1>Room {{ room_name }}</h1>
-        <button id="startGame">Start Game</button>
-        <div id="userCount">Users in room: 0</div>
-        <div id="drawer">Waiting for players...</div>
-        <div id="timer"></div>
-        <div id="word"></div>
-        <canvas id="canvas" width="800" height="600"></canvas>
-        <div id="drawingControls" style="display: none;">
-            <p id="turnMessage"></p>
-            <p>You are drawing. Please draw the word!</p>
-        </div>
-        <div id="guessingControls" style="display: none;">
-            <p id="turnMessage"></p>
-            <input type="text" id="guess" placeholder="Enter your guess">
-            <button id="sendGuess">Send Guess</button>
-        </div>
-    </div>
-    <div id="chat-section">
-        <div id="chat"></div>
-        <input type="text" id="messageInput" placeholder="Type a message...">
-        <button id="sendMessage">Send</button>
-    </div>
 </body>
 </html>
