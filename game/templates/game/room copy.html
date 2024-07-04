@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Room {{ room_name }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: row;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+        }
+        #drawing-section {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: #f4f4f4;
+        }
+        #chat-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid #ddd;
+            background-color: #fff;
+        }
+        #canvas {
+            border: 1px solid black;
+            background-color: white;
+        }
+        #chat {
+            flex: 1;
+            overflow-y: scroll;
+            border: 1px solid black;
+            margin: 10px;
+        }
+        #messageInput {
+            width: calc(100% - 20px);
+            margin: 10px;
+        }
+        #userCount, #turnMessage, #timer, #word {
+            margin: 10px;
+        }
+    </style>
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            let userId = localStorage.getItem('user_id');
+            let userName = localStorage.getItem('username');
+
+            if (!userId || !userName) {
+                userId = "{{ user_id }}";
+                userName = "{{ username }}";
+                localStorage.setItem('user_id', userId);
+                localStorage.setItem('username', userName);
+            }
+
+            const roomName = "{{ room_name }}";
+            const socket = new WebSocket('ws://' + window.location.host + '/ws/game/' + roomName + '/?userId=' + userId + '&username=' + userName);
+
+            let drawer = null;
+            let timer = null;
+            let drawingEnabled = false;
+
+            socket.onopen = function() {
+                console.log("WebSocket is open now.");
+                socket.send(JSON.stringify({
+                    'action': 'join',
+                    'username': userName,
+                    'userId': userId
+                }));
+            };
+
+            socket.onclose = function() {
+                console.log("WebSocket is closed now.");
+            };
+
+            socket.onerror = function(error) {
+                console.error("WebSocket error:", error);
+            };
+
+            socket.onmessage = function(e) {
+                const data = JSON.parse(e.data);
+                if (data.action === 'new_word') {
+                    document.getElementById('word').innerText = data.word;
+                    document.getElementById('turnMessage').innerText = 'It\'s your turn to draw.';
+                    document.getElementById('drawer').innerText = 'You are drawing';
+                } else if (data.action === 'draw') {
+                    const ctx = canvas.getContext('2d');
+                    const image = new Image();
+                    image.onload = function() {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(image, 0, 0);
+                    };
+                    image.src = data.drawing;
+                } else if (data.action === 'correct_guess') {
+                    const chat = document.getElementById('chat');
+                    chat.innerHTML += `<p><strong>${data.username}:</strong> guessed correctly: ${data.guess}</p>`;
+                    chat.scrollTop = chat.scrollHeight;
+                } else if (data.action === 'chat_message') {
+                    const chat = document.getElementById('chat');
+                    chat.innerHTML += `<p><strong>${data.username}:</strong> ${data.message}</p>`;
+                    chat.scrollTop = chat.scrollHeight;
+                } else if (data.action === 'user_count') {
+                    document.getElementById('userCount').innerText = `Users in room: ${data.user_count}`;
+                } else if (data.action === 'turn') {
+                    drawer = data.drawer;
+                    if (drawer !== userId) {
+                        document.getElementById('turnMessage').innerText = `It's ${drawer}'s turn to draw.`;
+                        document.getElementById('drawer').innerText = `${drawer} is drawing`;
+                    }
+                    drawingEnabled = (drawer === userId);
+                    document.getElementById('drawingControls').style.display = drawingEnabled ? 'block' : 'none';
+                    document.getElementById('guessingControls').style.display = drawingEnabled ? 'none' : 'block';
+                    startTimer(60);
+                } else if (data.action === 'clear_canvas') {
+                    const ctx = canvas.getContext('2d');
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                } else if (data.action === 'game_end') {
+                    alert("Game over! Click Start Game to play again.");
+                    document.getElementById('startGame').innerText = 'Start Game';
+                }
+            };
+
+            document.getElementById('startGame').onclick = function() {
+                socket.send(JSON.stringify({
+                    'action': 'start_game'
+                }));
+                document.getElementById('startGame').innerText = 'Restart Game';
+            };
+
+            document.getElementById('sendGuess').onclick = function() {
+                const guess = document.getElementById('guess').value;
+                socket.send(JSON.stringify({
+                    'action': 'guess',
+                    'guess': guess,
+                    'username': userName,
+                    'userId': userId
+                }));
+                document.getElementById('guess').value = '';
+            };
+
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            let drawing = false;
+
+            canvas.addEventListener('mousedown', (e) => {
+                if (!drawingEnabled) return;
+                drawing = true;
+                draw(e);
+            });
+
+            canvas.addEventListener('mousemove', draw);
+            canvas.addEventListener('mouseup', () => {
+                if (!drawingEnabled) return;
+                drawing = false;
+                ctx.beginPath();
+                socket.send(JSON.stringify({
+                    'action': 'drawing',
+                    'drawing': canvas.toDataURL(),
+                    'drawer': userId
+                }));
+            });
+
+            function draw(e) {
+                if (!drawing || !drawingEnabled) return;
+                ctx.lineWidth = 5;
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = 'black';
+
+                ctx.lineTo(e.clientX - canvas.offsetLeft, e.clientY - canvas.offsetTop);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(e.clientX - canvas.offsetLeft, e.clientY - canvas.offsetTop);
+            }
+
+            function startTimer(seconds) {
+                clearInterval(timer);
+                let timeLeft = seconds;
+                timer = setInterval(() => {
+                    if (timeLeft <= 0) {
+                        clearInterval(timer);
+                    } else {
+                        timeLeft -= 1;
+                        document.getElementById('timer').innerText = `Time left: ${timeLeft}s`;
+                    }
+                }, 1000);
+            }
+        });
+    </script>
+</head>
+<body>
+    <div id="drawing-section">
+        <h1>Room {{ room_name }}</h1>
+        <button id="startGame">Start Game</button>
+        <div id="userCount">Users in room: 0</div>
+        <div id="drawer">Waiting for players...</div>
+        <div id="timer"></div>
+        <div id="word"></div>
+        <canvas id="canvas" width="800" height="600"></canvas>
+        <div id="drawingControls" style="display: none;">
+            <p id="turnMessage"></p>
+            <p>You are drawing. Please draw the word!</p>
+        </div>
+        <div id="guessingControls" style="display: none;">
+            <p id="turnMessage"></p>
+            <input type="text" id="guess" placeholder="Enter your guess">
+            <button id="sendGuess">Send Guess</button>
+        </div>
+    </div>
+    <div id="chat-section">
+        <div id="chat"></div>
+        <input type="text" id="messageInput" placeholder="Type a message...">
+        <button id="sendMessage">Send</button>
+    </div>
+</body>
+</html>

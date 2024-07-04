@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Join a Room</title>
+</head>
+<body>
+    <h1>Join a Room</h1>
+    <form id="joinRoomForm">
+        <label for="username">Enter your name:</label>
+        <input type="text" id="username" name="username" required>
+        <br>
+        <label for="room">Enter room name:</label>
+        <input type="text" id="room" name="room" required>
+        <br>
+        <button type="submit">Join Room</button>
+    </form>
+    <script>
+        document.getElementById('joinRoomForm').onsubmit = function(e) {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const room = document.getElementById('room').value;
+            const userId = 'user-' + Math.random().toString(36).substr(2, 9);  // Generate unique user ID
+            sessionStorage.setItem('userId', userId);  // Store in session storage
+            window.location.href = `/game/${room}/?username=${encodeURIComponent(username)}&userId=${userId}`;
+        }
+    </script>
+</body>
+</html>
