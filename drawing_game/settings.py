@@ -74,24 +74,24 @@ TEMPLATES = [
 WSGI_APPLICATION = 'drawing_game.wsgi.application'
 ASGI_APPLICATION = 'drawing_game.asgi.application'
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {
-            "hosts": [("localhost", 6379)],
-        },
-    },
-}
 # CHANNEL_LAYERS = {
 #     "default": {
 #         "BACKEND": "channels_redis.core.RedisChannelLayer",
 #         "CONFIG": {
-#             "hosts": [
-#                 "redis://default:58KtGcuq9qdMLyaL25FuLmtffy0WGpP7@redis-14611.c100.us-east-1-4.ec2.redns.redis-cloud.com:14611"
-#             ],
+#             "hosts": [("localhost", 6379)],
 #         },
 #     },
 # }
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [
+                "redis://default:58KtGcuq9qdMLyaL25FuLmtffy0WGpP7@redis-14611.c100.us-east-1-4.ec2.redns.redis-cloud.com:14611"
+            ],
+        },
+    },
+}
 
 ALLOWED_HOSTS = ['*']
 # Database
